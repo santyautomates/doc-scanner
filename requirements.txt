@@ -1,0 +1,6 @@
+flask
+google-cloud-discoveryengine
+functions-framework
+google-adk==0.1.1
+pytest
+pytest-mock
