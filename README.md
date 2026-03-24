@@ -6,19 +6,61 @@ An automated document indexing pipeline that triggers real-time ingestion into *
 
 ## Architecture
 
+This system supports **two indexing modes**. Choose based on how quickly you need uploaded files to be searchable.
+
+---
+
+### Mode 1: Real-Time Indexing (Eventarc + Cloud Run)
+
+Files are searchable within ~1 minute of upload.
+
 ```mermaid
 flowchart LR
-    A[User uploads file\nto GCS Bucket] -->|Finalize event| B[Eventarc Trigger]
-    B -->|HTTP POST| C[Cloud Run\nsearch-refresher]
-    C -->|ImportDocumentsRequest| D[Vertex AI Search\nData Store]
-    D -->|Chunks & indexes| D
-    E[User] -->|Natural language query| F[ADK Web UI\nadk web .]
-    F -->|VertexAiSearchTool| D
-    D -->|Ranked chunks| F
-    F -->|Grounded answer| E
+    A["🗂 User uploads file\nto GCS Bucket"] -->|"Object finalized\nevent"| B["⚡ Eventarc Trigger\n(us multi-region)"]
+    B -->|"HTTP POST\nwith file metadata"| C["☁️ Cloud Run\nsearch-refresher"]
+    C -->|"ImportDocumentsRequest\n(Discovery Engine API)"| D["🔍 Vertex AI Search\nData Store"]
+    D -->|"Chunks & indexes\nwith Layout Parser"| D
+    E["👤 User"] -->|"Natural language\nquery"| F["🤖 ADK Web UI\nadk web ."]
+    F -->|"VertexAiSearchTool\n(grounded search)"| D
+    D -->|"Ranked chunks\n+ citations"| F
+    F -->|"Grounded answer"| E
 ```
 
-### Components
+**How it works step by step:**
+1. You drop a file (PDF, XLSX, DOCX, etc.) into the GCS bucket
+2. GCS emits a `google.cloud.storage.object.v1.finalized` event
+3. Eventarc catches the event and HTTP POSTs the file's bucket/name to Cloud Run
+4. Cloud Run calls the Vertex AI Discovery Engine `ImportDocumentsRequest` API to index just that one file
+5. Vertex AI Search chunks the file using the Layout Parser and stores the vectors
+6. The ADK agent can immediately answer questions about it
+
+---
+
+### Mode 2: Daily Auto-Sync (Simpler, no Cloud Run needed)
+
+Files are searchable within 24 hours. Vertex AI Search crawls the entire bucket on a schedule automatically.
+
+```mermaid
+flowchart LR
+    A["🗂 User uploads file\nto GCS Bucket"] -->|"Daily scheduled\ncrawl"| D["🔍 Vertex AI Search\nData Store"]
+    D -->|"Chunks & indexes\nwith Layout Parser"| D
+    E["👤 User"] -->|"Natural language\nquery"| F["🤖 ADK Web UI\nadk web ."]
+    F -->|"VertexAiSearchTool"| D
+    D -->|"Ranked chunks\n+ citations"| F
+    F -->|"Grounded answer"| E
+```
+
+**How it works:** Vertex AI Search has a native GCS connector with "Automatic synchronisation: Enabled" — it re-crawls the bucket every day (or at your set frequency) and re-indexes any new or changed files. No Cloud Run or Eventarc required.
+
+---
+
+### Which mode should I use?
+
+| Requirement | Mode |
+|---|---|
+| Need files searchable **within minutes** | Mode 1 (Real-Time) |
+| Daily delay is acceptable | Mode 2 (Auto-Sync only) |
+| Mix of urgent + batch uploads | Both modes together |
 
 | Component | Description |
 |---|---|
